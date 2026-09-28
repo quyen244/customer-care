@@ -1,0 +1,49 @@
+version: 2
+
+sources:
+  - name: raw
+    description: Landing tables written by the Python ingestion service (validated, upserted on natural key).
+    schema: raw
+    config:
+      loaded_at_field: _loaded_at
+      freshness:
+        warn_after: {count: 3, period: hour}
+        error_after: {count: 12, period: hour}
+    tables:
+      - name: crm_customers
+        description: CRM system of record, pulled incrementally from the CRM REST API.
+        config:
+          freshness:  # only changed customers land; ~1 signup/upgrade every 14h is normal
+            warn_after: {count: 2, period: day}
+            error_after: {count: 7, period: day}
+        columns:
+          - name: customer_id
+            data_tests: [unique, not_null]
+      - name: agents
+        description: Support agent roster exported from the ticketing platform.
+        config:
+          freshness:  # roster changes rarely; only a stale feed for days is a problem
+            warn_after: {count: 7, period: day}
+            error_after: {count: 30, period: day}
+        columns:
+          - name: agent_id
+            data_tests: [unique, not_null]
+      - name: tickets
+        description: Support tickets (current state) from the ticketing platform's incremental export.
+        columns:
+          - name: ticket_id
+            data_tests: [unique, not_null]
+      - name: sales_orders
+        description: Subscription orders from the billing system.
+        config:
+          freshness:
+            warn_after: {count: 2, period: day}
+            error_after: {count: 7, period: day}
+        columns:
+          - name: order_id
+            data_tests: [unique, not_null]
+      - name: csat_surveys
+        description: Post-resolution CSAT surveys (sent and answered) from the survey tool.
+        columns:
+          - name: survey_id
+            data_tests: [unique, not_null]

@@ -1,0 +1,84 @@
+version: 2
+
+models:
+  - name: stg_crm__customers
+    description: CRM customers with standardized segment / plan values.
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+      - name: segment
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['SMB', 'Mid-Market', 'Enterprise']
+      - name: plan_tier
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['starter', 'professional', 'business', 'enterprise']
+
+  - name: stg_ticketing__agents
+    columns:
+      - name: agent_id
+        data_tests: [unique, not_null]
+      - name: team
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['tier_1', 'tier_2', 'technical', 'billing']
+
+  - name: stg_ticketing__tickets
+    description: Tickets with lower-cased enums (source sends mixed casing, e.g. 'OPEN', 'Pending').
+    columns:
+      - name: ticket_id
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests: [not_null]
+      - name: status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['new', 'open', 'pending', 'on_hold', 'resolved', 'closed']
+      - name: priority
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('seed_sla_policy')
+                field: priority
+      - name: channel
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['email', 'chat', 'phone', 'web_form', 'social', 'unknown']
+      - name: created_at
+        data_tests: [not_null]
+      - name: reopen_count
+        data_tests: [non_negative]
+
+  - name: stg_billing__sales_orders
+    columns:
+      - name: order_id
+        data_tests: [unique, not_null]
+      - name: amount
+        data_tests: [not_null, non_negative]
+      - name: status
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['paid', 'failed', 'refunded', 'pending']
+
+  - name: stg_survey__csat
+    columns:
+      - name: survey_id
+        data_tests: [unique, not_null]
+      - name: ticket_id
+        data_tests: [not_null]
+      - name: score
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5]
+                quote: false

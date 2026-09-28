@@ -1,0 +1,296 @@
+{
+  "id": "ccSlaAlerts0001",
+  "name": "Customer Care - SLA & backlog alerts",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveDataSuccessExecution": "all"
+  },
+  "nodes": [
+    {
+      "id": "a1",
+      "name": "Every 15 minutes",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 15
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "a2",
+      "name": "After pipeline run (Airflow webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        220
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cc-sla-check",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "6d1f0c55-3a7e-4f1e-9d57-0cc5a1a3e001"
+    },
+    {
+      "id": "a3",
+      "name": "Fetch SLA status",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        260,
+        100
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH s AS (\n  SELECT * FROM marts.v_sla_alert_status\n),\nlast_sent AS (\n  SELECT alert_type, max(sent_at) AS last_sent_at\n  FROM alerting.alert_log\n  WHERE alert_type IN ('sla_compliance', 'backlog')\n  GROUP BY alert_type\n),\nnew_urgent AS (\n  SELECT u.*\n  FROM marts.v_urgent_sla_breaches u\n  WHERE NOT EXISTS (\n    SELECT 1 FROM alerting.alert_log l\n    WHERE l.alert_type = 'urgent_breach' AND l.alert_key = u.ticket_id\n  )\n  ORDER BY u.created_at\n)\nSELECT\n  s.*,\n  (SELECT last_sent_at FROM last_sent WHERE alert_type = 'sla_compliance') AS sla_compliance_last_sent_at,\n  (SELECT last_sent_at FROM last_sent WHERE alert_type = 'backlog') AS backlog_last_sent_at,\n  COALESCE((SELECT json_agg(new_urgent) FROM new_urgent), '[]'::json) AS new_urgent_breaches\nFROM s;",
+        "options": {}
+      },
+      "credentials": {
+        "postgres": {
+          "id": "ccWarehouseAlrt",
+          "name": "Customer Care Warehouse (alerting_bot)"
+        }
+      }
+    },
+    {
+      "id": "a4",
+      "name": "Evaluate thresholds",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        520,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// Thresholds live in env so ops can tune them without editing the workflow.\nconst complianceTarget = Number($env.SLA_COMPLIANCE_THRESHOLD || 90);\nconst backlogLimit = Number($env.BACKLOG_THRESHOLD || 350);\nconst cooldownMin = Number($env.ALERT_COOLDOWN_MINUTES || 120);\n\nconst s = $input.first().json;\nconst now = new Date(s.evaluated_at);\nconst cooledDown = (last) => !last || (now - new Date(last)) / 60000 >= cooldownMin;\nconst num = (v) => (v === null || v === undefined ? null : Number(v));\n\nconst alerts = [];\nconst compliance = num(s.sla_compliance_pct_24h);\nconst decided = num(s.sla_met_24h) + num(s.sla_breached_24h);\nif (compliance !== null && compliance < complianceTarget && cooledDown(s.sla_compliance_last_sent_at)) {\n  alerts.push({\n    alert_type: 'sla_compliance',\n    alert_key: 'rolling_24h',\n    severity: compliance < complianceTarget - 10 ? 'critical' : 'warning',\n    line: `First-response SLA compliance (rolling 24h) is ${compliance}%, below the ${complianceTarget}% target: ${num(s.sla_breached_24h)} of ${decided} decided tickets breached.`,\n  });\n}\n\nconst backlog = num(s.open_backlog);\nif (backlog > backlogLimit && cooledDown(s.backlog_last_sent_at)) {\n  alerts.push({\n    alert_type: 'backlog',\n    alert_key: 'open_backlog',\n    severity: backlog > backlogLimit * 1.25 ? 'critical' : 'warning',\n    line: `Open ticket backlog is ${backlog} (limit ${backlogLimit}); ${num(s.open_backlog_urgent_high)} of them are urgent/high priority.`,\n  });\n}\n\nfor (const u of s.new_urgent_breaches || []) {\n  const waited = Math.round(Number(u.minutes_waited));\n  const state = u.first_response_at ? `answered after ${waited} min` : `STILL UNANSWERED after ${waited} min`;\n  alerts.push({\n    alert_type: 'urgent_breach',\n    alert_key: u.ticket_id,\n    severity: 'critical',\n    line: `URGENT ${u.ticket_id} - ${u.company_name} (${u.segment}), ${u.category_name} / ${u.subcategory_name} via ${u.channel}: ${state} (target ${u.first_response_target_minutes} min). Agent: ${u.agent_name}, ${u.team_name}.`,\n  });\n}\n\nif (alerts.length === 0) {\n  return [];\n}\n\nconst critical = alerts.some((a) => a.severity === 'critical');\nconst metrics = {\n  evaluated_at: s.evaluated_at,\n  data_loaded_through: s.data_loaded_through,\n  sla_compliance_pct_24h: compliance,\n  tickets_created_24h: num(s.tickets_created_24h),\n  open_backlog: backlog,\n  urgent_breached_24h: num(s.urgent_breached_24h),\n  urgent_breached_open: num(s.urgent_breached_open),\n};\nconst counts = alerts.reduce((acc, a) => ({ ...acc, [a.alert_type]: (acc[a.alert_type] || 0) + 1 }), {});\nconst subject = `[${critical ? 'CRITICAL' : 'WARNING'}] Customer Care SLA alert - ${Object.entries(counts).map(([k, v]) => `${k} x${v}`).join(', ')}`;\nconst text = [\n  `Customer Care SLA monitor fired ${alerts.length} alert(s) at ${s.evaluated_at} (data loaded through ${s.data_loaded_through}).`,\n  '',\n  ...alerts.map((a) => `- [${a.severity.toUpperCase()}] ${a.line}`),\n  '',\n  `Snapshot: compliance 24h = ${compliance ?? 'n/a'}%, tickets created 24h = ${metrics.tickets_created_24h}, open backlog = ${backlog}, urgent breaches 24h = ${metrics.urgent_breached_24h} (${metrics.urgent_breached_open} still open).`,\n  `Dashboard: ${$env.DASHBOARD_URL}  |  Pipeline: ${$env.AIRFLOW_URL}`,\n].join('\\n');\n\nreturn [{\n  json: {\n    subject,\n    text,\n    slack_enabled: Boolean($env.SLACK_WEBHOOK_URL),\n    alerts: alerts.map((a) => ({ alert_type: a.alert_type, alert_key: a.alert_key, severity: a.severity, message: a.line })),\n    metrics,\n  },\n}];"
+      }
+    },
+    {
+      "id": "a5",
+      "name": "Send email alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        780,
+        100
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.ALERT_EMAIL_FROM }}",
+        "toEmail": "={{ $env.ALERT_EMAIL_TO }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "ccMailpitSmtp01",
+          "name": "Mailpit SMTP (local email sink)"
+        }
+      }
+    },
+    {
+      "id": "a6",
+      "name": "Slack configured?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1040,
+        100
+      ],
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Evaluate thresholds').first().json.slack_enabled }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "looseTypeValidation": true,
+        "options": {}
+      }
+    },
+    {
+      "id": "a7",
+      "name": "Post to Slack",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1300,
+        0
+      ],
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.SLACK_WEBHOOK_URL }}",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ text: '*' + $('Evaluate thresholds').first().json.subject + '*\\n' + $('Evaluate thresholds').first().json.text }) }}",
+        "options": {}
+      }
+    },
+    {
+      "id": "a8",
+      "name": "Prepare alert_log rows",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1560,
+        100
+      ],
+      "parameters": {
+        "jsCode": "// One alert_log row per fired alert; also the dedup/cooldown memory for the next evaluation.\nconst e = $('Evaluate thresholds').first().json;\nconst channels = ['email', 'log'].concat(e.slack_enabled ? ['slack'] : []);\nreturn e.alerts.map((a) => ({\n  json: { ...a, metrics: JSON.stringify(e.metrics), channels: `{${channels.join(',')}}` },\n}));"
+      }
+    },
+    {
+      "id": "a9",
+      "name": "Record in alert_log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1820,
+        100
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO alerting.alert_log (alert_type, alert_key, severity, message, metrics, channels)\nVALUES ($1, $2, $3, $4, $5::jsonb, $6::text[]);",
+        "options": {
+          "queryReplacement": "={{ [$json.alert_type, $json.alert_key, $json.severity, $json.message, $json.metrics, $json.channels] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "ccWarehouseAlrt",
+          "name": "Customer Care Warehouse (alerting_bot)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Every 15 minutes": {
+      "main": [
+        [
+          {
+            "node": "Fetch SLA status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "After pipeline run (Airflow webhook)": {
+      "main": [
+        [
+          {
+            "node": "Fetch SLA status",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Fetch SLA status": {
+      "main": [
+        [
+          {
+            "node": "Evaluate thresholds",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Evaluate thresholds": {
+      "main": [
+        [
+          {
+            "node": "Send email alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send email alert": {
+      "main": [
+        [
+          {
+            "node": "Slack configured?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack configured?": {
+      "main": [
+        [
+          {
+            "node": "Post to Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Prepare alert_log rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post to Slack": {
+      "main": [
+        [
+          {
+            "node": "Prepare alert_log rows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare alert_log rows": {
+      "main": [
+        [
+          {
+            "node": "Record in alert_log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

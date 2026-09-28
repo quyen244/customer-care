@@ -1,0 +1,124 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Customer Care Data & SLA Intelligence Platform</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+  :root { --bg: #0b1220; --panel: #121c30; --line: #24324d; --text: #e8eefc; --muted: #93a3c4;
+          --blue: #4f8cff; --green: #37c47d; --amber: #f5b53d; --red: #ef5b5b; --violet: #8b7cf6; }
+  * { box-sizing: border-box; margin: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; background: var(--bg); color: var(--text);
+               font-family: Inter, "Segoe UI", system-ui, sans-serif; }
+  .slide { display: none; width: 1920px; height: 1080px; padding: 110px 140px; position: relative;
+           background: radial-gradient(1200px 600px at 85% -10%, rgba(79,140,255,.18), transparent 60%),
+                       radial-gradient(900px 500px at -10% 110%, rgba(55,196,125,.12), transparent 60%), var(--bg); }
+  .slide.active { display: block; }
+  .kicker { font-size: 26px; font-weight: 600; letter-spacing: .14em; text-transform: uppercase; color: var(--blue); }
+  h1 { font-size: 92px; line-height: 1.04; font-weight: 800; margin-top: 26px; letter-spacing: -.02em; }
+  h2 { font-size: 60px; font-weight: 800; letter-spacing: -.01em; }
+  .lead { font-size: 34px; line-height: 1.45; color: var(--muted); margin-top: 34px; max-width: 1450px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 60px; }
+  .chip { font-size: 26px; font-weight: 600; padding: 14px 26px; border-radius: 999px; background: var(--panel);
+          border: 1px solid var(--line); }
+  .chip b { color: var(--blue); font-weight: 700; }
+  .footer { position: absolute; left: 140px; bottom: 80px; font-size: 24px; color: var(--muted); }
+  /* architecture */
+  .flow { display: grid; grid-template-columns: 1.1fr 1fr 1fr 1fr 1.1fr; gap: 44px; margin-top: 90px; align-items: center; }
+  .col { display: flex; flex-direction: column; gap: 18px; position: relative; }
+  .box { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 22px 24px; }
+  .box .t { font-size: 27px; font-weight: 700; }
+  .box .s { font-size: 21px; color: var(--muted); margin-top: 6px; line-height: 1.35; }
+  .src .box { border-left: 6px solid var(--amber); }
+  .ing .box { border-left: 6px solid var(--red); }
+  .wh .box { border-left: 6px solid var(--blue); }
+  .dbt .box { border-left: 6px solid var(--violet); }
+  .out .box { border-left: 6px solid var(--green); }
+  .col:not(:last-child)::after { content: ""; position: absolute; right: -40px; top: 50%; width: 30px; height: 4px;
+          background: var(--muted); }
+  .col:not(:last-child)::before { content: ""; position: absolute; right: -44px; top: calc(50% - 8px);
+          border-left: 14px solid var(--muted); border-top: 10px solid transparent; border-bottom: 10px solid transparent; }
+  .orch { margin-top: 70px; padding: 26px 32px; border: 2px dashed var(--line); border-radius: 18px; font-size: 27px; color: var(--muted); }
+  .orch b { color: var(--text); }
+  /* outro */
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 28px; margin-top: 80px; }
+  .stat { background: var(--panel); border: 1px solid var(--line); border-radius: 20px; padding: 34px 32px; }
+  .stat .n { font-size: 68px; font-weight: 800; color: var(--blue); }
+  .stat .l { font-size: 25px; color: var(--muted); margin-top: 8px; line-height: 1.35; }
+  .bullets { margin-top: 64px; display: grid; grid-template-columns: 1fr 1fr; gap: 18px 60px; font-size: 29px; line-height: 1.4; }
+  .bullets div::before { content: "\2713"; color: var(--green); font-weight: 800; margin-right: 16px; }
+</style>
+</head>
+<body>
+
+<section class="slide" id="title">
+  <div class="kicker">Data Engineering Portfolio Project</div>
+  <h1>Customer Care Data &amp;<br>SLA Intelligence Platform</h1>
+  <p class="lead">An end-to-end pipeline that turns CRM, ticketing, billing and CSAT data into SLA dashboards and real-time alerts for Customer Care management.</p>
+  <div class="chips">
+    <span class="chip"><b>Python</b> ingestion</span><span class="chip"><b>PostgreSQL</b> warehouse</span>
+    <span class="chip"><b>dbt</b> star schema</span><span class="chip"><b>Airflow</b> orchestration</span>
+    <span class="chip"><b>Metabase</b> dashboards</span><span class="chip"><b>n8n</b> alerting</span>
+    <span class="chip"><b>Docker</b> Compose</span>
+  </div>
+  <div class="footer">Everything in this video is running live on a laptop via docker compose up.</div>
+</section>
+
+<section class="slide" id="arch">
+  <div class="kicker">Architecture</div>
+  <h2>From source systems to decisions</h2>
+  <div class="flow">
+    <div class="col src">
+      <div class="box"><div class="t">CRM</div><div class="s">REST API, paginated, incremental</div></div>
+      <div class="box"><div class="t">Ticketing</div><div class="s">CSV exports every 15 min</div></div>
+      <div class="box"><div class="t">Billing + CSAT</div><div class="s">CSV exports</div></div>
+    </div>
+    <div class="col ing">
+      <div class="box"><div class="t">Ingestion</div><div class="s">Idempotent upserts, retries, JSON logs</div></div>
+      <div class="box"><div class="t">Validation</div><div class="s">Nulls, duplicates, bad timestamps, invalid status &rarr; quarantine</div></div>
+    </div>
+    <div class="col wh">
+      <div class="box"><div class="t">PostgreSQL</div><div class="s">raw &middot; staging &middot; marts &middot; data_quality</div></div>
+    </div>
+    <div class="col dbt">
+      <div class="box"><div class="t">dbt</div><div class="s">Staging views, incremental facts, 90 data tests + unit test</div></div>
+      <div class="box"><div class="t">Star schema</div><div class="s">5 dimensions, 4 facts, SLA mart</div></div>
+    </div>
+    <div class="col out">
+      <div class="box"><div class="t">Metabase</div><div class="s">SLA, CSAT, backlog, agents, data quality</div></div>
+      <div class="box"><div class="t">n8n alerts</div><div class="s">SLA &lt; 90%, backlog, urgent breach &rarr; email / Slack</div></div>
+    </div>
+  </div>
+  <div class="orch"><b>Airflow</b> runs it hourly: ingest &rarr; data-quality gate &rarr; freshness &rarr; dbt staging &rarr; tests &rarr; dbt marts &rarr; tests &rarr; trigger n8n. Retries, failure alerts, run history.</div>
+</section>
+
+<section class="slide" id="outro">
+  <div class="kicker">What was built</div>
+  <h2>Production patterns, not a toy demo</h2>
+  <div class="stats">
+    <div class="stat"><div class="n">23k+</div><div class="l">tickets simulated with real-world peaks, reopens and outages</div></div>
+    <div class="stat"><div class="n">505</div><div class="l">bad source records caught and quarantined automatically</div></div>
+    <div class="stat"><div class="n">91</div><div class="l">dbt tests guarding every layer, incl. an SLA unit test</div></div>
+    <div class="stat"><div class="n">4</div><div class="l">alert rules with dedup and cooldown, delivered by n8n</div></div>
+  </div>
+  <div class="bullets">
+    <div>Incremental dbt models with late-data lookback</div>
+    <div>SLA breaches detected even before a reply exists</div>
+    <div>Airflow retries + actionable failure alerts</div>
+    <div>Least-privilege database roles per service</div>
+    <div>Dashboards and alerts provisioned as code</div>
+    <div>One command to run: docker compose up</div>
+  </div>
+</section>
+
+<script>
+  const show = () => {
+    const id = (location.hash || '#title').slice(1);
+    document.querySelectorAll('.slide').forEach((s) => s.classList.toggle('active', s.id === id));
+  };
+  window.addEventListener('hashchange', show);
+  show();
+</script>
+</body>
+</html>

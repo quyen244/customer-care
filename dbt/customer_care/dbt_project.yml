@@ -1,0 +1,34 @@
+name: customer_care
+version: "1.0.0"
+config-version: 2
+profile: customer_care
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+models:
+  customer_care:
+    staging:
+      +schema: staging
+      +materialized: view
+    marts:
+      +schema: marts
+      +materialized: table
+
+seeds:
+  customer_care:
+    +schema: marts
+    seed_sla_policy:
+      +column_types:
+        priority: text
+        priority_rank: integer
+        first_response_target_minutes: integer
+        resolution_target_minutes: integer
+
+data_tests:
+  customer_care:
+    +store_failures: false

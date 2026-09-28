@@ -1,0 +1,151 @@
+{
+  "id": "ccPipelineFail01",
+  "name": "Customer Care - pipeline failure alerts",
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "UTC",
+    "saveDataSuccessExecution": "all"
+  },
+  "nodes": [
+    {
+      "id": "b1",
+      "name": "Airflow task failed (webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.1,
+      "position": [
+        0,
+        0
+      ],
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "cc-pipeline-failure",
+        "responseMode": "onReceived",
+        "options": {}
+      },
+      "webhookId": "6d1f0c55-3a7e-4f1e-9d57-0cc5a1a3e002"
+    },
+    {
+      "id": "b2",
+      "name": "Format failure alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        260,
+        0
+      ],
+      "parameters": {
+        "jsCode": "const b = $input.first().json.body || {};\nconst key = `${b.dag_id}:${b.task_id}:${b.run_id}`;\nconst message = `Pipeline task failed: ${b.dag_id}.${b.task_id} (run ${b.run_id}, try ${b.try_number}). Error: ${b.error}`;\nreturn [{\n  json: {\n    subject: `[CRITICAL] Customer Care pipeline failure - ${b.task_id}`,\n    text: `${message}\\n\\nSLA dashboards may be stale until the pipeline recovers.\\nAirflow: ${$env.AIRFLOW_URL}/dags/${b.dag_id}`,\n    alert_type: 'pipeline_failure',\n    alert_key: key,\n    severity: 'critical',\n    message,\n    metrics: JSON.stringify(b),\n    channels: '{email,log}',\n  },\n}];"
+      }
+    },
+    {
+      "id": "b3",
+      "name": "Send email alert",
+      "type": "n8n-nodes-base.emailSend",
+      "typeVersion": 2.1,
+      "position": [
+        520,
+        0
+      ],
+      "parameters": {
+        "fromEmail": "={{ $env.ALERT_EMAIL_FROM }}",
+        "toEmail": "={{ $env.ALERT_EMAIL_TO }}",
+        "subject": "={{ $json.subject }}",
+        "emailFormat": "text",
+        "text": "={{ $json.text }}",
+        "options": {
+          "appendAttribution": false
+        }
+      },
+      "credentials": {
+        "smtp": {
+          "id": "ccMailpitSmtp01",
+          "name": "Mailpit SMTP (local email sink)"
+        }
+      }
+    },
+    {
+      "id": "b4",
+      "name": "Carry alert row",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        780,
+        0
+      ],
+      "parameters": {
+        "jsCode": "return $('Format failure alert').all();"
+      }
+    },
+    {
+      "id": "b5",
+      "name": "Record in alert_log",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.6,
+      "position": [
+        1040,
+        0
+      ],
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO alerting.alert_log (alert_type, alert_key, severity, message, metrics, channels)\nVALUES ($1, $2, $3, $4, $5::jsonb, $6::text[]);",
+        "options": {
+          "queryReplacement": "={{ [$json.alert_type, $json.alert_key, $json.severity, $json.message, $json.metrics, $json.channels] }}"
+        }
+      },
+      "credentials": {
+        "postgres": {
+          "id": "ccWarehouseAlrt",
+          "name": "Customer Care Warehouse (alerting_bot)"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Airflow task failed (webhook)": {
+      "main": [
+        [
+          {
+            "node": "Format failure alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Format failure alert": {
+      "main": [
+        [
+          {
+            "node": "Send email alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send email alert": {
+      "main": [
+        [
+          {
+            "node": "Carry alert row",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Carry alert row": {
+      "main": [
+        [
+          {
+            "node": "Record in alert_log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "pinData": {}
+}

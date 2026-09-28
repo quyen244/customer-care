@@ -1,0 +1,190 @@
+version: 2
+
+models:
+  # ------------------------------------------------------------------ dimensions
+  - name: dim_date
+    description: Calendar dimension (UTC), 2023-01-01 to one year ahead.
+    columns:
+      - name: date_key
+        data_tests: [unique, not_null]
+
+  - name: dim_customer
+    description: Current-state (SCD1) customer profile from CRM, enriched with billing revenue. Includes an UNKNOWN member.
+    columns:
+      - name: customer_id
+        data_tests: [unique, not_null]
+      - name: segment
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: ['SMB', 'Mid-Market', 'Enterprise', 'Unknown']
+      - name: lifetime_revenue
+        data_tests: [non_negative]
+
+  - name: dim_agent
+    description: Support agents with team. Includes an UNASSIGNED member.
+    columns:
+      - name: agent_id
+        data_tests: [unique, not_null]
+
+  - name: dim_ticket_category
+    columns:
+      - name: category_key
+        data_tests: [unique, not_null]
+
+  - name: dim_channel
+    columns:
+      - name: channel_key
+        data_tests: [unique, not_null]
+
+  - name: dim_priority
+    description: Priorities with their SLA targets (from seed_sla_policy).
+    columns:
+      - name: priority_key
+        data_tests: [unique, not_null]
+
+  # ------------------------------------------------------------------ facts
+  - name: fact_tickets
+    description: One row per ticket, current state. Incremental merge on ticket_id.
+    columns:
+      - name: ticket_id
+        data_tests: [unique, not_null]
+      - name: customer_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_customer'), field: customer_id}
+      - name: agent_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_agent'), field: agent_id}
+      - name: category_key
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_ticket_category'), field: category_key}
+      - name: channel_key
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_channel'), field: channel_key}
+      - name: priority_key
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_priority'), field: priority_key}
+      - name: created_date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_key}
+      - name: first_response_minutes
+        data_tests: [non_negative]
+      - name: resolution_minutes
+        data_tests: [non_negative]
+
+  - name: fact_sla
+    description: >
+      One row per ticket with first-response and resolution SLA outcome.
+      Status values: met (answered/resolved within target); breached (answered/resolved late,
+      or still waiting past the due time); pending (still waiting, inside the target window).
+      Compliance % = met / (met + breached); pending tickets are excluded until decided.
+      Pending rows are re-evaluated on every run because time alone can turn them into breaches.
+    columns:
+      - name: ticket_id
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments: {to: ref('fact_tickets'), field: ticket_id}
+      - name: first_response_sla_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['met', 'breached', 'pending']
+      - name: resolution_sla_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['met', 'breached', 'pending']
+
+  - name: fact_csat
+    description: One row per CSAT survey (sent), with the response if the customer answered.
+    columns:
+      - name: survey_id
+        data_tests: [unique, not_null]
+      - name: agent_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_agent'), field: agent_id}
+      - name: score
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2, 3, 4, 5]
+                quote: false
+
+  - name: fact_agent_performance
+    description: One row per agent per day of activity (assigned, first responses, resolutions, reopens, SLA, CSAT).
+    data_tests:
+      - unique_combination_of_columns:
+          arguments:
+            columns: ['agent_id', 'date_key']
+    columns:
+      - name: agent_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_agent'), field: agent_id}
+      - name: date_key
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('dim_date'), field: date_key}
+
+  - name: mart_daily_sla_summary
+    description: One row per day. KPI tiles, trend charts and n8n thresholds read from here.
+    columns:
+      - name: date_key
+        data_tests: [unique, not_null]
+      - name: first_response_sla_compliance_pct
+        data_tests:
+          - pct_between_0_and_100
+      - name: open_backlog_eod
+        data_tests: [non_negative]
+
+  - name: v_sla_live
+    description: Query-time SLA evaluation used for alerting between dbt runs.
+  - name: v_sla_alert_status
+    description: Single-row operational health snapshot polled by n8n.
+  - name: v_urgent_sla_breaches
+    description: Urgent tickets that breached first-response SLA in the last 24h, with context for the alert message.
+
+unit_tests:
+  - name: sla_status_met_breached_pending
+    description: Answered on time = met, answered late = breached, unanswered past due = breached, unanswered inside window = pending.
+    model: fact_sla
+    overrides:
+      macros:
+        is_incremental: false
+        current_ts: "'2026-09-28 12:00:00+00'::timestamptz"
+    given:
+      - input: ref('fact_tickets')
+        rows:
+          - {ticket_id: T1, priority_key: urgent, created_at: "2026-09-28 10:00:00+00", first_response_at: "2026-09-28 10:10:00+00", first_response_minutes: 10, is_open: false, resolved_at: "2026-09-28 11:00:00+00", resolution_minutes: 60}
+          - {ticket_id: T2, priority_key: urgent, created_at: "2026-09-28 10:00:00+00", first_response_at: "2026-09-28 10:20:00+00", first_response_minutes: 20, is_open: true}
+          - {ticket_id: T3, priority_key: high, created_at: "2026-09-28 10:00:00+00", is_open: true}
+          - {ticket_id: T4, priority_key: low, created_at: "2026-09-28 10:00:00+00", is_open: true}
+          - {ticket_id: T5, priority_key: urgent, created_at: "2026-09-28 06:00:00+00", first_response_at: "2026-09-28 06:05:00+00", first_response_minutes: 5, is_open: false, resolved_at: "2026-09-28 11:00:00+00", resolution_minutes: 300}
+      - input: ref('seed_sla_policy')
+        rows:
+          - {priority: urgent, priority_rank: 1, first_response_target_minutes: 15, resolution_target_minutes: 240}
+          - {priority: high, priority_rank: 2, first_response_target_minutes: 60, resolution_target_minutes: 1440}
+          - {priority: low, priority_rank: 4, first_response_target_minutes: 480, resolution_target_minutes: 7200}
+    expect:
+      rows:
+        - {ticket_id: T1, first_response_sla_status: met, resolution_sla_status: met}
+        - {ticket_id: T2, first_response_sla_status: breached, resolution_sla_status: pending}
+        - {ticket_id: T3, first_response_sla_status: breached, resolution_sla_status: pending}
+        - {ticket_id: T4, first_response_sla_status: pending, resolution_sla_status: pending}
+        - {ticket_id: T5, first_response_sla_status: met, resolution_sla_status: breached}

@@ -1,0 +1,36 @@
+# Secrets and local config (.env.example is the committed template)
+.env
+.env.*
+!.env.example
+
+# Local backups (the n8n dump contains user accounts and password hashes)
+backups/
+*.dump
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Runtime data and logs
+data/
+*.log
+airflow/logs/
+
+# dbt artifacts
+dbt/customer_care/target/
+dbt/customer_care/dbt_packages/
+dbt/customer_care/logs/
+dbt/customer_care/profiles/.user.yml
+
+# Demo recorder output (the final video and GIFs live in docs/demo/media/)
+docs/demo/raw/
+*.webm
+_state.json
+
+# Editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db

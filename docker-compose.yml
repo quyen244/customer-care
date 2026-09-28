@@ -1,0 +1,247 @@
+name: customer-care-data
+
+x-airflow-common: &airflow-common
+  build:
+    context: .
+    dockerfile: airflow/Dockerfile
+  image: customer-care/airflow:3.3.2
+  environment: &airflow-env
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__PARALLELISM: "8"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__FERNET_KEY: ${AIRFLOW_FERNET_KEY}
+    AIRFLOW__CORE__EXECUTION_API_SERVER_URL: http://airflow-apiserver:8080/execution/
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_USERS: admin:admin
+    AIRFLOW__CORE__SIMPLE_AUTH_MANAGER_PASSWORDS_FILE: /opt/airflow/simple_auth_passwords.json
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:${AIRFLOW_DB_PASSWORD}@postgres:5432/airflow
+    AIRFLOW__API_AUTH__JWT_SECRET: ${AIRFLOW_JWT_SECRET}
+    AIRFLOW__API__SECRET_KEY: ${AIRFLOW_API_SECRET_KEY}
+    AIRFLOW__SCHEDULER__ENABLE_HEALTH_CHECK: "true"
+    # pipeline runtime config (read by ingestion, dbt profile and the DAG)
+    WAREHOUSE_HOST: postgres
+    WAREHOUSE_PORT: "5432"
+    WAREHOUSE_DB: customer_care
+    WAREHOUSE_USER: etl_user
+    WAREHOUSE_PASSWORD: ${ETL_DB_PASSWORD}
+    LANDING_DIR: /data/landing
+    CRM_API_URL: http://crm-api:8000
+    CRM_API_KEY: ${CRM_API_KEY}
+    N8N_WEBHOOK_BASE: http://n8n:5678/webhook
+    MAX_REJECT_RATE: ${MAX_REJECT_RATE:-0.05}
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./ingestion:/opt/pipeline/ingestion
+    - ./dbt/customer_care:/opt/pipeline/dbt
+    - airflow-logs:/opt/airflow/logs
+    - landing:/data/landing
+  depends_on:
+    airflow-init:
+      condition: service_completed_successfully
+  restart: unless-stopped
+
+services:
+  # ------------------------------------------------------------------ warehouse
+  postgres:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_DB: customer_care
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      ETL_DB_PASSWORD: ${ETL_DB_PASSWORD}
+      BI_DB_PASSWORD: ${BI_DB_PASSWORD}
+      ALERTING_DB_PASSWORD: ${ALERTING_DB_PASSWORD}
+      AIRFLOW_DB_PASSWORD: ${AIRFLOW_DB_PASSWORD}
+      N8N_DB_PASSWORD: ${N8N_DB_PASSWORD}
+      METABASE_DB_PASSWORD: ${METABASE_DB_PASSWORD}
+    command: ["postgres", "-c", "max_connections=200", "-c", "shared_buffers=256MB", "-c", "log_min_duration_statement=2000"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${POSTGRES_HOST_PORT:-5433}:5432"  # for Power BI / DBeaver on the host
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d customer_care"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------ simulated source systems
+  crm-api:
+    build: ./data_generator
+    image: customer-care/source-systems:1.0
+    environment:
+      SIM_START_DATE: ${SIM_START_DATE:-2026-04-01}
+      SIM_SEED: ${SIM_SEED:-42}
+      CRM_API_KEY: ${CRM_API_KEY}
+      CRM_API_FAILURE_RATE: ${CRM_API_FAILURE_RATE:-0.05}
+    ports:
+      - "${CRM_API_HOST_PORT:-8001}:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  source-exporter:
+    build: ./data_generator
+    image: customer-care/source-systems:1.0
+    command: ["sh", "export_loop.sh"]
+    user: "50000:0"  # same uid as Airflow so ingestion can archive the files it loaded
+    environment:
+      SIM_START_DATE: ${SIM_START_DATE:-2026-04-01}
+      SIM_SEED: ${SIM_SEED:-42}
+      EXPORT_INTERVAL_SECONDS: ${EXPORT_INTERVAL_SECONDS:-900}
+      LANDING_DIR: /data/landing
+    volumes:
+      - landing:/data/landing
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------ orchestration
+  airflow-init:
+    <<: *airflow-common
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: ["bash", "-c", "airflow db migrate && airflow version"]
+    restart: "no"
+
+  airflow-apiserver:
+    <<: *airflow-common
+    command:
+      - bash
+      - -c
+      - >-
+        printf '{"admin": "%s"}' "$$AIRFLOW_ADMIN_PASSWORD" > /opt/airflow/simple_auth_passwords.json
+        && exec airflow api-server
+    environment:
+      <<: *airflow-env
+      AIRFLOW_ADMIN_PASSWORD: ${AIRFLOW_ADMIN_PASSWORD}
+    ports:
+      - "${AIRFLOW_HOST_PORT:-8088}:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v2/monitor/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  airflow-scheduler:
+    <<: *airflow-common
+    command: ["airflow", "scheduler"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8974/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+
+  airflow-dag-processor:
+    <<: *airflow-common
+    command: ["airflow", "dag-processor"]
+
+  # ------------------------------------------------------------------ alerting
+  n8n:
+    image: n8nio/n8n:2.40.7
+    depends_on:
+      postgres:
+        condition: service_healthy
+    entrypoint: ["sh", "/bootstrap/start.sh"]
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY}
+      N8N_SECURE_COOKIE: "false"
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_PERSONALIZATION_ENABLED: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "false"
+      NODE_OPTIONS: --max-http-header-size=65536  # same localhost-cookie bloat as Metabase (HTTP 431)
+      GENERIC_TIMEZONE: UTC
+      TZ: UTC
+      # values rendered into the bootstrap credentials + read by the workflows
+      ALERTING_DB_PASSWORD: ${ALERTING_DB_PASSWORD}
+      N8N_OWNER_EMAIL: ${N8N_OWNER_EMAIL}
+      N8N_OWNER_PASSWORD: ${N8N_OWNER_PASSWORD}
+      SLA_COMPLIANCE_THRESHOLD: ${SLA_COMPLIANCE_THRESHOLD:-90}
+      BACKLOG_THRESHOLD: ${BACKLOG_THRESHOLD:-350}
+      ALERT_COOLDOWN_MINUTES: ${ALERT_COOLDOWN_MINUTES:-120}
+      ALERT_EMAIL_TO: ${ALERT_EMAIL_TO}
+      ALERT_EMAIL_FROM: ${ALERT_EMAIL_FROM}
+      SLACK_WEBHOOK_URL: ${SLACK_WEBHOOK_URL:-}
+      DASHBOARD_URL: http://localhost:${METABASE_HOST_PORT:-3000}
+      AIRFLOW_URL: http://localhost:${AIRFLOW_HOST_PORT:-8088}
+    volumes:
+      - ./n8n:/bootstrap:ro
+      - n8n-data:/home/node/.n8n
+    ports:
+      - "${N8N_HOST_PORT:-5680}:5678"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:5678/healthz"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    ports:
+      - "${MAILPIT_HOST_PORT:-8025}:8025"  # web UI showing every alert email n8n sends
+    restart: unless-stopped
+
+  # ------------------------------------------------------------------ BI
+  metabase:
+    image: metabase/metabase:v0.63.18.2
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_HOST: postgres
+      MB_DB_PORT: "5432"
+      MB_DB_DBNAME: metabase
+      MB_DB_USER: metabase
+      MB_DB_PASS: ${METABASE_DB_PASSWORD}
+      MB_ANON_TRACKING_ENABLED: "false"
+      MB_CHECK_FOR_UPDATES: "false"
+      # Browsers send every localhost cookie (from all local apps/ports); the 8KB default returns HTTP 431.
+      MB_JETTY_REQUEST_HEADER_SIZE: "65536"
+      JAVA_OPTS: -Xmx1g
+    ports:
+      - "${METABASE_HOST_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+    restart: unless-stopped
+
+  metabase-bootstrap:
+    image: python:3.12-slim
+    depends_on:
+      metabase:
+        condition: service_healthy
+    command: ["python", "/bootstrap/bootstrap_metabase.py"]
+    environment:
+      MB_URL: http://metabase:3000
+      MB_ADMIN_EMAIL: ${METABASE_ADMIN_EMAIL}
+      MB_ADMIN_PASSWORD: ${METABASE_ADMIN_PASSWORD}
+      WAREHOUSE_HOST: postgres
+      WAREHOUSE_DB: customer_care
+      WAREHOUSE_BI_USER: bi_reader
+      WAREHOUSE_BI_PASSWORD: ${BI_DB_PASSWORD}
+    volumes:
+      - ./metabase:/bootstrap:ro
+    restart: on-failure:3
+
+volumes:
+  pgdata:
+  landing:
+  airflow-logs:
+  n8n-data:

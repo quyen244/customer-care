@@ -1,0 +1,20 @@
+select
+    ticket_id,
+    customer_id,
+    agent_id,
+    subject,
+    lower(trim(category))                         as category,
+    lower(trim(subcategory))                      as subcategory,
+    lower(trim(priority))                         as priority,
+    coalesce(lower(trim(channel)), 'unknown')     as channel,
+    lower(trim(status))                           as status,
+    lower(trim(status)) in ('new', 'open', 'pending', 'on_hold') as is_open,
+    created_at,
+    first_response_at,
+    resolved_at,
+    closed_at,
+    reopened_at,
+    coalesce(reopen_count, 0)                     as reopen_count,
+    updated_at,
+    _loaded_at
+from {{ source('raw', 'tickets') }}
