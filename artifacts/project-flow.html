@@ -1,0 +1,193 @@
+<title>Luồng Customer Care Data</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Be+Vietnam+Pro:wght@400;600;700&display=swap">
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #f5f7fa; --ink: #1d2733; --muted: #5b6878; --card: #ffffff; --line: #1d2733;
+    --blue: #2f6fd6; --blue-soft: #e4edfb; --red: #c9423a; --red-soft: #fbe6e4;
+    --green: #23875a; --green-soft: #e1f3ea; --amber: #b7791f; --amber-soft: #fbf0dc;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --bg: #131a22; --ink: #e2e9f2; --muted: #9aa8b8; --card: #1b2430; --line: #e2e9f2;
+      --blue: #7aa7f0; --blue-soft: #1c2b44; --red: #f08a82; --red-soft: #3a2224;
+      --green: #6fcf9f; --green-soft: #183327; --amber: #e8b25e; --amber-soft: #36291a;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --bg: #131a22; --ink: #e2e9f2; --muted: #9aa8b8; --card: #1b2430; --line: #e2e9f2;
+    --blue: #7aa7f0; --blue-soft: #1c2b44; --red: #f08a82; --red-soft: #3a2224;
+    --green: #6fcf9f; --green-soft: #183327; --amber: #e8b25e; --amber-soft: #36291a;
+  }
+  body { background: var(--bg); color: var(--ink); font-family: "Be Vietnam Pro", "Segoe UI", system-ui, sans-serif;
+         margin: 0; padding-inline: 20px; padding-block: 28px 48px; }
+  main { max-width: 1180px; margin: 0 auto; display: grid; gap: 22px; }
+  h1 { font-size: 28px; margin: 0; text-wrap: balance; }
+  .lead { margin: 6px 0 0; color: var(--muted); max-width: 70ch; line-height: 1.55; }
+  .verdict { display: flex; gap: 14px; align-items: flex-start; background: var(--red-soft); border-radius: 14px;
+             padding: 16px 20px; border: 2px dashed var(--red); }
+  .verdict b { color: var(--red); font-size: 20px; white-space: nowrap; }
+  .verdict p { margin: 0; line-height: 1.55; }
+  figure { margin: 0; background: var(--card); border-radius: 16px; padding: 12px; overflow-x: auto; }
+  svg { display: block; width: 100%; min-width: 900px; height: auto; color: var(--ink);
+        font-family: "Patrick Hand", "Comic Sans MS", cursive; }
+  svg .box { fill: var(--card); stroke: var(--line); stroke-width: 2; }
+  svg .src { fill: var(--amber-soft); }
+  svg .core { fill: var(--blue-soft); }
+  svg .bad { fill: var(--red-soft); stroke: var(--red); }
+  svg .out { fill: var(--green-soft); }
+  svg .band { fill: none; stroke: var(--blue); stroke-width: 2; stroke-dasharray: 8 6; }
+  svg .flow { stroke: var(--line); stroke-width: 2; fill: none; }
+  svg .ctrl { stroke: var(--blue); stroke-width: 1.6; fill: none; stroke-dasharray: 5 5; }
+  svg .badflow { stroke: var(--red); stroke-width: 2; fill: none; }
+  svg text { fill: currentColor; }
+  svg .t { font-size: 19px; }
+  svg .s { font-size: 14px; fill: var(--muted); }
+  svg .lbl { font-size: 14px; }
+  svg .blue { fill: var(--blue); }
+  svg .red { fill: var(--red); }
+  figcaption { font-size: 14px; color: var(--muted); padding: 8px 6px 2px; line-height: 1.5; }
+  table { border-collapse: collapse; width: 100%; background: var(--card); border-radius: 14px; overflow: hidden; }
+  .tablewrap { overflow-x: auto; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid color-mix(in srgb, var(--muted) 25%, transparent); vertical-align: top; }
+  th { font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  td:last-child { white-space: nowrap; font-weight: 600; }
+  .no { color: var(--red); }
+  .idea { color: var(--muted); font-size: 14px; line-height: 1.55; margin: 0; }
+</style>
+
+<main>
+  <header>
+    <h1>Project đi từ đâu đến đâu?</h1>
+    <p class="lead">Dữ liệu đi từ 4 hệ thống nguồn, qua kiểm tra chất lượng, vào kho PostgreSQL, được dbt biến thành mô hình phân tích, rồi kết thúc ở dashboard cho quản lý và email cảnh báo khi SLA bị vi phạm. Airflow điều khiển toàn bộ mỗi giờ.</p>
+  </header>
+
+  <div class="verdict">
+    <b>Không dùng LLM.</b>
+    <p>Mình đã quét toàn bộ code: không có OpenAI, Anthropic hay node AI nào trong n8n. Mọi bước là code Python/SQL và luật cố định (ví dụ SLA &lt; 90%, backlog &gt; 350), nên kết quả luôn lặp lại được và không tốn phí API. LLM (Claude) chỉ được dùng lúc <em>xây dựng</em> project: viết code, kiểm thử, quay video.</p>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 1160 560" role="img" aria-label="Luồng dữ liệu: 4 nguồn dữ liệu, qua Python ingestion kiểm tra lỗi, vào PostgreSQL raw, dbt staging và marts, rồi tới Metabase dashboard và n8n gửi email hoặc Slack; Airflow điều khiển mỗi giờ; không có bước nào dùng LLM.">
+      <defs>
+        <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+        <marker id="arrBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#2f6fd6"/>
+        </marker>
+        <marker id="arrRed" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="#c9423a"/>
+        </marker>
+      </defs>
+
+      <!-- Airflow orchestration band -->
+      <rect class="band" x="230" y="18" width="760" height="58" rx="14"/>
+      <text class="t blue" x="250" y="44">Airflow (mỗi giờ)</text>
+      <text class="s" x="250" y="64">ingest → cổng chất lượng → dbt staging → test → dbt marts → test → gọi n8n</text>
+      <path class="ctrl" d="M395 76 V196" marker-end="url(#arrBlue)"/>
+      <path class="ctrl" d="M855 76 V126" marker-end="url(#arrBlue)"/>
+      <path class="ctrl" d="M990 47 H1148 V381 H1134" marker-end="url(#arrBlue)"/>
+      <text class="lbl blue" x="403" y="140">chạy</text>
+      <text class="lbl blue" x="863" y="108">chạy</text>
+      <text class="lbl blue" x="1062" y="40">gọi webhook</text>
+
+      <!-- sources -->
+      <text class="s" x="20" y="120">1. NGUỒN DỮ LIỆU</text>
+      <rect class="box src" x="20" y="132" width="170" height="56" rx="10"/>
+      <text class="t" x="34" y="158">CRM</text><text class="s" x="34" y="178">REST API</text>
+      <rect class="box src" x="20" y="202" width="170" height="56" rx="10"/>
+      <text class="t" x="34" y="228">Ticketing</text><text class="s" x="34" y="248">ticket + agent (CSV)</text>
+      <rect class="box src" x="20" y="272" width="170" height="56" rx="10"/>
+      <text class="t" x="34" y="298">Billing</text><text class="s" x="34" y="318">đơn hàng (CSV)</text>
+      <rect class="box src" x="20" y="342" width="170" height="56" rx="10"/>
+      <text class="t" x="34" y="368">CSAT</text><text class="s" x="34" y="388">khảo sát (CSV)</text>
+
+      <path class="flow" d="M190 160 C215 160 215 240 238 244" marker-end="url(#arr)"/>
+      <path class="flow" d="M190 230 L238 248" marker-end="url(#arr)"/>
+      <path class="flow" d="M190 300 L238 256" marker-end="url(#arr)"/>
+      <path class="flow" d="M190 370 C215 370 215 262 238 260" marker-end="url(#arr)"/>
+      <text class="lbl" x="20" y="424">↳ gửi file mỗi 15 phút / API</text>
+
+      <!-- ingestion -->
+      <text class="s" x="240" y="192">2. NẠP + KIỂM TRA</text>
+      <rect class="box core" x="240" y="200" width="170" height="104" rx="10"/>
+      <text class="t" x="254" y="228">Python ingestion</text>
+      <text class="s" x="254" y="250">kiểm tra: null, trùng,</text>
+      <text class="s" x="254" y="268">sai giờ, sai status</text>
+      <text class="s" x="254" y="288">nạp lại không trùng</text>
+
+      <path class="badflow" d="M325 304 V402" marker-end="url(#arrRed)"/>
+      <text class="lbl red" x="333" y="360">dòng lỗi</text>
+      <rect class="box bad" x="240" y="406" width="170" height="60" rx="10"/>
+      <text class="t red" x="254" y="432">Quarantine</text>
+      <text class="s" x="254" y="452">lưu kèm lý do lỗi</text>
+
+      <!-- warehouse raw -->
+      <path class="flow" d="M410 252 L478 252" marker-end="url(#arr)"/>
+      <text class="lbl" x="420" y="242">upsert</text>
+      <text class="s" x="480" y="216">3. KHO DỮ LIỆU</text>
+      <rect class="box core" x="480" y="224" width="170" height="60" rx="10"/>
+      <text class="t" x="494" y="250">PostgreSQL · raw</text>
+      <text class="s" x="494" y="270">dữ liệu gốc đã sạch</text>
+
+      <!-- dbt -->
+      <path class="flow" d="M650 240 C680 240 675 160 698 158" marker-end="url(#arr)"/>
+      <text class="s" x="700" y="120">4. BIẾN ĐỔI (dbt)</text>
+      <rect class="box core" x="700" y="130" width="170" height="60" rx="10"/>
+      <text class="t" x="714" y="156">staging</text>
+      <text class="s" x="714" y="176">chuẩn hoá, ép kiểu</text>
+      <path class="flow" d="M785 190 V256" marker-end="url(#arr)"/>
+      <text class="lbl" x="793" y="228">test rồi mới đi tiếp</text>
+      <rect class="box core" x="700" y="260" width="170" height="74" rx="10"/>
+      <text class="t" x="714" y="286">marts (star schema)</text>
+      <text class="s" x="714" y="306">fact_tickets, fact_sla,</text>
+      <text class="s" x="714" y="324">fact_csat, dim_*</text>
+
+      <!-- outputs -->
+      <text class="s" x="930" y="192">5. KẾT QUẢ</text>
+      <path class="flow" d="M870 280 C900 280 895 226 928 224" marker-end="url(#arr)"/>
+      <text class="lbl" x="878" y="250">đọc</text>
+      <rect class="box out" x="930" y="200" width="200" height="56" rx="10"/>
+      <text class="t" x="944" y="226">Metabase dashboard</text>
+      <text class="s" x="944" y="246">SLA, backlog, CSAT, agent</text>
+
+      <path class="flow" d="M870 314 C900 314 900 376 928 378" marker-end="url(#arr)"/>
+      <text class="lbl" x="790" y="358">kiểm tra SLA</text>
+      <rect class="box out" x="930" y="350" width="200" height="62" rx="10"/>
+      <text class="t" x="944" y="376">n8n cảnh báo</text>
+      <text class="s" x="944" y="396">luật cố định, không AI</text>
+      <path class="flow" d="M1030 412 V466" marker-end="url(#arr)"/>
+      <text class="lbl" x="1038" y="444">gửi</text>
+      <rect class="box out" x="930" y="470" width="200" height="56" rx="10"/>
+      <text class="t" x="944" y="496">Email / Slack</text>
+      <text class="s" x="944" y="516">quản lý nhận cảnh báo</text>
+
+      <!-- no-LLM stamp -->
+      <g transform="translate(560 470) rotate(-4)">
+        <rect x="-4" y="-30" width="250" height="60" rx="10" fill="none" stroke="#c9423a" stroke-width="2.5" stroke-dasharray="3 4"/>
+        <text class="t red" x="10" y="-4">LLM trong hệ thống:</text>
+        <text class="t red" x="10" y="20">KHÔNG CÓ</text>
+      </g>
+    </svg>
+    <figcaption>Mũi tên liền là dữ liệu chạy qua; mũi tên nét đứt màu xanh là Airflow điều khiển từng bước. Dữ liệu lỗi bị tách sang Quarantine ngay ở bước 2 nên không bao giờ vào kho.</figcaption>
+  </figure>
+
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Bước</th><th>Công cụ</th><th>Làm gì</th><th>Dùng LLM?</th></tr></thead>
+      <tbody>
+        <tr><td>1. Nguồn</td><td>Python simulator</td><td>Giả lập CRM, ticket, billing, CSAT như hệ thống thật</td><td class="no">Không</td></tr>
+        <tr><td>2. Nạp + kiểm tra</td><td>Python</td><td>Luật kiểm tra cố định, dòng lỗi vào quarantine</td><td class="no">Không</td></tr>
+        <tr><td>3. Kho</td><td>PostgreSQL</td><td>Lưu raw, staging, marts</td><td class="no">Không</td></tr>
+        <tr><td>4. Biến đổi</td><td>dbt (SQL)</td><td>Star schema, tính SLA, 91 test</td><td class="no">Không</td></tr>
+        <tr><td>5. Kết quả</td><td>Metabase, n8n</td><td>Dashboard và cảnh báo theo ngưỡng</td><td class="no">Không</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="idea">Nếu muốn thêm AI sau này, chỗ hợp lý nhất là: tự phân loại ticket theo nội dung, đọc cảm xúc (sentiment) trong comment CSAT, hoặc viết tóm tắt cho email cảnh báo. Khi đó LLM chỉ làm thêm bước phụ, còn số liệu SLA vẫn nên tính bằng SQL để luôn chính xác.</p>
+</main>
